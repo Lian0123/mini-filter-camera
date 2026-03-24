@@ -1,5 +1,77 @@
 export const FILTER_PRESETS = [
   { id: 'clean', name: 'Clean', description: '自然還原', settings: {} },
+  {
+    id: 'beauty-natural',
+    name: 'Beauty Natural',
+    description: '自然美顏',
+    settings: { brightness: 106, contrast: 94, saturate: 114, blur: 0.6, faceSlim: 8 }
+  },
+  {
+    id: 'beauty-soft',
+    name: 'Beauty Soft',
+    description: '柔光美顏',
+    settings: { brightness: 112, contrast: 90, saturate: 118, blur: 1.1, sepia: 8, faceSlim: 12 }
+  },
+  {
+    id: 'skin-smooth',
+    name: 'Skin Smooth',
+    description: '柔焦美肌',
+    settings: { brightness: 109, contrast: 92, saturate: 108, blur: 1.4 }
+  },
+  {
+    id: 'skin-glass',
+    name: 'Glass Skin',
+    description: '透亮美肌',
+    settings: { brightness: 113, contrast: 96, saturate: 122, blur: 0.7, sepia: 6 }
+  },
+  {
+    id: 'portrait-slim',
+    name: 'Portrait Slim',
+    description: '人像瘦臉',
+    settings: { brightness: 103, contrast: 104, saturate: 112, faceSlim: 18 }
+  },
+  {
+    id: 'selfie-pro',
+    name: 'Selfie Pro',
+    description: '自拍修飾',
+    settings: { brightness: 108, contrast: 102, saturate: 124, blur: 0.6, faceSlim: 14 }
+  },
+  {
+    id: 'pearl-skin',
+    name: 'Pearl Skin',
+    description: '珍珠肌',
+    settings: { brightness: 114, contrast: 88, saturate: 104, blur: 1.3, sepia: 10 }
+  },
+  {
+    id: 'bridal',
+    name: 'Bridal',
+    description: '新娘柔霧',
+    settings: { brightness: 116, contrast: 86, saturate: 114, blur: 1.5, sepia: 14, faceSlim: 10 }
+  },
+  {
+    id: 'rose-glow',
+    name: 'Rose Glow',
+    description: '玫瑰紅潤',
+    settings: { brightness: 109, contrast: 95, saturate: 128, hueRotate: -6, blur: 0.8 }
+  },
+  {
+    id: 'studio-face',
+    name: 'Studio Face',
+    description: '棚拍修容',
+    settings: { brightness: 102, contrast: 108, saturate: 118, sepia: 6, faceSlim: 16 }
+  },
+  {
+    id: 'airbrush',
+    name: 'Airbrush',
+    description: '空氣感美顏',
+    settings: { brightness: 111, contrast: 89, saturate: 120, blur: 1.8, faceSlim: 9 }
+  },
+  {
+    id: 'sweet-selfie',
+    name: 'Sweet Selfie',
+    description: '甜美自拍',
+    settings: { brightness: 112, contrast: 94, saturate: 130, hueRotate: -10, blur: 0.9, faceSlim: 13 }
+  },
   { id: 'cinema', name: 'Cinema', description: '電影冷調', settings: { contrast: 112, saturate: 118, brightness: 96, sepia: 10 } },
   { id: 'sunwash', name: 'Sunwash', description: '暖陽泛白', settings: { brightness: 110, contrast: 88, saturate: 120, sepia: 18 } },
   { id: 'mono', name: 'Mono', description: '經典黑白', settings: { grayscale: 100, contrast: 116 } },
@@ -41,7 +113,8 @@ export const DEFAULT_FILTER_SETTINGS = {
   sepia: 0,
   grayscale: 0,
   invert: 0,
-  blur: 0
+  blur: 0,
+  faceSlim: 0
 }
 
 export const FILTER_CONTROLS = [
@@ -52,7 +125,8 @@ export const FILTER_CONTROLS = [
   { key: 'sepia', label: '懷舊', min: 0, max: 100, step: 1, unit: '%' },
   { key: 'grayscale', label: '灰階', min: 0, max: 100, step: 1, unit: '%' },
   { key: 'invert', label: '反相', min: 0, max: 100, step: 1, unit: '%' },
-  { key: 'blur', label: '模糊', min: 0, max: 4, step: 0.1, unit: 'px' }
+  { key: 'blur', label: '模糊', min: 0, max: 4, step: 0.1, unit: 'px' },
+  { key: 'faceSlim', label: '瘦臉', min: 0, max: 30, step: 1, unit: '%' }
 ]
 
 export function mergeFilterSettings(presetSettings = {}) {

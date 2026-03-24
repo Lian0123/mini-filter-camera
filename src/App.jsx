@@ -48,6 +48,20 @@ const QUALITY_MODES = [
   }
 ]
 
+const CAMERA_MODE_PATTERN = {
+  front: /(front|user|face ?time|selfie)/i,
+  rear: /(back|rear|environment|world|ultra|wide|tele|macro|main)/i
+}
+
+const CAMERA_CONTROL_LABELS = {
+  colorTemperature: '白平衡',
+  exposureCompensation: '曝光補償',
+  exposureTime: '快門',
+  iso: 'ISO',
+  aperture: '光圈',
+  focusDistance: '對焦距離'
+}
+
 function stopStream(stream) {
   if (!stream) {
     return
@@ -56,6 +70,26 @@ function stopStream(stream) {
   stream.getTracks().forEach((track) => {
     track.stop()
   })
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function getNumericCapabilityRange(value) {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  if (!Number.isFinite(value.min) || !Number.isFinite(value.max)) {
+    return null
+  }
+
+  return value
+}
+
+function getCapabilityOptions(value) {
+  return Array.isArray(value) ? value : []
 }
 
 function getCameraConstraints({ cameraMode, deviceId, qualityId }) {
@@ -79,46 +113,6 @@ function getCameraConstraints({ cameraMode, deviceId, qualityId }) {
 function detectTorch(track) {
   const capabilities = typeof track?.getCapabilities === 'function' ? track.getCapabilities() : {}
   return Boolean(capabilities?.torch)
-}
-
-async function setTorch(track, enabled) {
-  if (!track || !detectTorch(track)) {
-    return false
-  }
-
-  await track.applyConstraints({
-    advanced: [{ torch: enabled }]
-  })
-
-  return true
-}
-
-function getCameraErrorMessage(caughtError) {
-  if (!(caughtError instanceof Error)) {
-    return '無法取得相機存取權。請確認瀏覽器已允許相機權限後再試一次。'
-  }
-
-  if (caughtError.name === 'NotAllowedError' || caughtError.name === 'PermissionDeniedError') {
-    return '瀏覽器拒絕了相機權限。請點擊「啟動相機」，並在權限提示中選擇允許；若先前已拒絕，請到瀏覽器網站設定把相機改成允許後再重試。'
-  }
-
-  if (caughtError.name === 'NotFoundError' || caughtError.name === 'DevicesNotFoundError') {
-    return '找不到可用的相機裝置。請確認手機或電腦有可用鏡頭。'
-  }
-
-  if (caughtError.name === 'NotReadableError' || caughtError.name === 'TrackStartError') {
-    return '相機目前被其他 App 或分頁占用。請關閉其他正在使用鏡頭的程式後再試一次。'
-  }
-
-  if (caughtError.name === 'OverconstrainedError') {
-    return '目前裝置不支援這組鏡頭或畫質條件。請改用其他鏡頭或畫質模式後重試。'
-  }
-
-  if (caughtError.name === 'SecurityError') {
-    return '目前環境無法安全存取相機。請確認你是從 https 的 GitHub Pages 網址開啟，而不是本機檔案。'
-  }
-
-  return caughtError.message || '無法取得相機存取權。請稍後重試。'
 }
 
 function detectPlatform() {
@@ -178,19 +172,214 @@ function getPermissionGuide({ platform, isStandalone, permissionState }) {
   ]
 }
 
-function drawZoomedFrame(context, video, canvas, zoomLevel) {
+function getCameraErrorMessage(caughtError) {
+  if (!(caughtError instanceof Error)) {
+    return '無法取得相機存取權。請確認瀏覽器已允許相機權限後再試一次。'
+  }
+
+  if (caughtError.name === 'NotAllowedError' || caughtError.name === 'PermissionDeniedError') {
+    return '瀏覽器拒絕了相機權限。請點擊「啟動相機」，並在權限提示中選擇允許；若先前已拒絕，請到瀏覽器網站設定把相機改成允許後再重試。'
+  }
+
+  if (caughtError.name === 'NotFoundError' || caughtError.name === 'DevicesNotFoundError') {
+    return '找不到可用的相機裝置。請確認手機或電腦有可用鏡頭。'
+  }
+
+  if (caughtError.name === 'NotReadableError' || caughtError.name === 'TrackStartError') {
+    return '相機目前被其他 App 或分頁占用。請關閉其他正在使用鏡頭的程式後再試一次。'
+  }
+
+  if (caughtError.name === 'OverconstrainedError') {
+    return '目前裝置不支援這組鏡頭或畫質條件。請改用其他鏡頭或畫質模式後重試。'
+  }
+
+  if (caughtError.name === 'SecurityError') {
+    return '目前環境無法安全存取相機。請確認你是從 https 的 GitHub Pages 網址開啟，而不是本機檔案。'
+  }
+
+  return caughtError.message || '無法取得相機存取權。請稍後重試。'
+}
+
+function cameraLabelMatchesMode(label, mode) {
+  return CAMERA_MODE_PATTERN[mode].test(label || '')
+}
+
+function pickPreferredDevice(devices, mode) {
+  const labeledMatch = devices.find((device) => cameraLabelMatchesMode(device.label, mode))
+  if (labeledMatch) {
+    return labeledMatch
+  }
+
+  if (devices.length <= 1) {
+    return devices[0] ?? null
+  }
+
+  return mode === 'rear' ? devices.at(-1) : devices[0]
+}
+
+function trackMatchesMode(settings, devices, mode) {
+  if (mode === 'front' && settings.facingMode === 'user') {
+    return true
+  }
+
+  if (mode === 'rear' && settings.facingMode === 'environment') {
+    return true
+  }
+
+  const device = devices.find((item) => item.deviceId === settings.deviceId)
+  return device ? cameraLabelMatchesMode(device.label, mode) : false
+}
+
+function getTrackSnapshot(track) {
+  return {
+    capabilities: typeof track?.getCapabilities === 'function' ? track.getCapabilities() : {},
+    settings: typeof track?.getSettings === 'function' ? track.getSettings() : {},
+    supportedConstraints: navigator.mediaDevices?.getSupportedConstraints?.() ?? {}
+  }
+}
+
+async function listVideoInputs() {
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  return devices.filter((device) => device.kind === 'videoinput')
+}
+
+async function openCameraStream(options) {
+  let nextStream = await navigator.mediaDevices.getUserMedia(getCameraConstraints(options))
+  let devices = await listVideoInputs()
+  let snapshot = getTrackSnapshot(nextStream.getVideoTracks()[0])
+
+  if (!options.deviceId && devices.length > 1 && !trackMatchesMode(snapshot.settings, devices, options.cameraMode)) {
+    const preferredDevice = pickPreferredDevice(devices, options.cameraMode)
+    if (preferredDevice?.deviceId && preferredDevice.deviceId !== snapshot.settings.deviceId) {
+      stopStream(nextStream)
+      nextStream = await navigator.mediaDevices.getUserMedia(
+        getCameraConstraints({ ...options, deviceId: preferredDevice.deviceId })
+      )
+      devices = await listVideoInputs()
+      snapshot = getTrackSnapshot(nextStream.getVideoTracks()[0])
+    }
+  }
+
+  return {
+    stream: nextStream,
+    devices,
+    snapshot
+  }
+}
+
+function getPreviewTransform(zoomLevel, faceSlim) {
+  const slimScale = clamp(1 - (faceSlim ?? 0) / 100 * 0.18, 0.82, 1)
+  const compensatedScale = zoomLevel / slimScale
+  return `scale(${compensatedScale}) scaleX(${slimScale})`
+}
+
+function drawProcessedFrame(context, video, canvas, zoomLevel, faceSlim) {
   const sourceWidth = video.videoWidth / zoomLevel
   const sourceHeight = video.videoHeight / zoomLevel
   const sourceX = (video.videoWidth - sourceWidth) / 2
   const sourceY = (video.videoHeight - sourceHeight) / 2
+  const slimScale = clamp(1 - (faceSlim ?? 0) / 100 * 0.18, 0.82, 1)
 
-  context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+  context.save()
+  context.translate(canvas.width / 2, canvas.height / 2)
+  context.scale(slimScale, 1)
+  context.drawImage(
+    video,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    -canvas.width / (2 * slimScale),
+    -canvas.height / 2,
+    canvas.width / slimScale,
+    canvas.height
+  )
+  context.restore()
+}
+
+function formatPermissionState(value) {
+  if (value === 'granted') {
+    return '已允許'
+  }
+
+  if (value === 'denied') {
+    return '已拒絕'
+  }
+
+  if (value === 'prompt') {
+    return '待確認'
+  }
+
+  return '未知'
+}
+
+function formatCameraModeLabel(value) {
+  const labels = {
+    auto: '自動',
+    continuous: '連續',
+    manual: '手動',
+    none: '關閉',
+    single: '單次',
+    'single-shot': '單次'
+  }
+
+  return labels[value] ?? value
+}
+
+function formatRangeValue(key, value) {
+  if (!Number.isFinite(value)) {
+    return '--'
+  }
+
+  if (key === 'exposureTime') {
+    return `${(value * 1000).toFixed(1)} ms`
+  }
+
+  if (key === 'aperture') {
+    return `f/${value.toFixed(1)}`
+  }
+
+  if (key === 'colorTemperature') {
+    return `${Math.round(value)} K`
+  }
+
+  if (key === 'iso') {
+    return `${Math.round(value)}`
+  }
+
+  return value.toFixed(2)
+}
+
+function getStepForRange(key, range) {
+  if (key === 'exposureTime') {
+    return 0.001
+  }
+
+  if (key === 'aperture') {
+    return 0.1
+  }
+
+  if (key === 'focusDistance') {
+    return 0.01
+  }
+
+  if (key === 'colorTemperature') {
+    return 50
+  }
+
+  if (key === 'iso') {
+    return 10
+  }
+
+  const spread = range.max - range.min
+  return spread > 2 ? 0.1 : 0.01
 }
 
 export default function App() {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
+
   const [stream, setStream] = useState(null)
   const [devices, setDevices] = useState([])
   const [selectedDeviceId, setSelectedDeviceId] = useState('')
@@ -210,14 +399,48 @@ export default function App() {
   const [platform, setPlatform] = useState('desktop')
   const [isStandalone, setIsStandalone] = useState(false)
   const [zoomLevel, setZoomLevel] = useState(1)
+  const [cameraCapabilities, setCameraCapabilities] = useState({})
+  const [cameraSettings, setCameraSettings] = useState({})
+  const [supportedConstraints, setSupportedConstraints] = useState({})
+  const [focusPoints, setFocusPoints] = useState([])
 
   const activePreset = FILTER_PRESETS.find((preset) => preset.id === activePresetId) ?? FILTER_PRESETS[0]
   const filterStyle = buildFilterString(filterSettings)
+  const previewTransform = getPreviewTransform(zoomLevel, filterSettings.faceSlim)
   const permissionGuide = getPermissionGuide({
     platform,
     isStandalone,
     permissionState: permissionHintState === 'denied' ? PERMISSION_STATE.denied : permissionState
   })
+
+  const whiteBalanceModes = getCapabilityOptions(cameraCapabilities.whiteBalanceMode)
+  const focusModes = getCapabilityOptions(cameraCapabilities.focusMode)
+  const colorTemperatureRange = getNumericCapabilityRange(cameraCapabilities.colorTemperature)
+  const exposureCompensationRange = getNumericCapabilityRange(cameraCapabilities.exposureCompensation)
+  const exposureTimeRange = getNumericCapabilityRange(cameraCapabilities.exposureTime)
+  const isoRange = getNumericCapabilityRange(cameraCapabilities.iso)
+  const apertureRange = getNumericCapabilityRange(cameraCapabilities.aperture)
+  const focusDistanceRange = getNumericCapabilityRange(cameraCapabilities.focusDistance)
+  const supportsPointsOfInterest =
+    supportedConstraints.pointsOfInterest === true || Array.isArray(cameraCapabilities.pointsOfInterest)
+
+  const proRangeControls = [
+    { key: 'colorTemperature', range: colorTemperatureRange },
+    { key: 'exposureCompensation', range: exposureCompensationRange },
+    { key: 'exposureTime', range: exposureTimeRange },
+    { key: 'iso', range: isoRange },
+    { key: 'aperture', range: apertureRange },
+    { key: 'focusDistance', range: focusDistanceRange }
+  ].filter((item) => item.range)
+
+  const proSupportSummary = [
+    whiteBalanceModes.length > 0 || colorTemperatureRange ? '白平衡' : null,
+    focusModes.length > 0 || focusDistanceRange ? '對焦' : null,
+    exposureTimeRange ? '快門' : null,
+    isoRange ? 'ISO' : null,
+    apertureRange ? '光圈' : null,
+    exposureCompensationRange ? '曝光補償' : null
+  ].filter(Boolean)
 
   useEffect(() => {
     setPlatform(detectPlatform())
@@ -268,39 +491,56 @@ export default function App() {
       setStatus('正在啟動相機…')
 
       try {
-        const nextStream = await navigator.mediaDevices.getUserMedia(
-          getCameraConstraints({
+        let result
+
+        try {
+          result = await openCameraStream({
             cameraMode,
             deviceId: selectedDeviceId,
             qualityId
           })
-        )
+        } catch (initialError) {
+          if (!selectedDeviceId) {
+            const fallbackDevices = await listVideoInputs()
+            const preferredDevice = pickPreferredDevice(fallbackDevices, cameraMode)
+
+            if (!preferredDevice?.deviceId) {
+              throw initialError
+            }
+
+            result = await openCameraStream({
+              cameraMode,
+              deviceId: preferredDevice.deviceId,
+              qualityId
+            })
+          } else {
+            throw initialError
+          }
+        }
 
         if (cancelled) {
-          stopStream(nextStream)
+          stopStream(result.stream)
           return
         }
 
-        const [videoTrack] = nextStream.getVideoTracks()
-        const nextTorchSupported = detectTorch(videoTrack)
+        const [videoTrack] = result.stream.getVideoTracks()
 
         stopStream(streamRef.current)
-        streamRef.current = nextStream
-        setStream(nextStream)
-        setTorchSupported(nextTorchSupported)
+        streamRef.current = result.stream
+        setStream(result.stream)
+        setDevices(result.devices)
+        setTorchSupported(detectTorch(videoTrack))
         setTorchEnabled(false)
         setPermissionState(PERMISSION_STATE.granted)
         setPermissionHintState('granted')
-        setStatus('相機已就緒')
+        setCameraCapabilities(result.snapshot.capabilities)
+        setCameraSettings(result.snapshot.settings)
+        setSupportedConstraints(result.snapshot.supportedConstraints)
+        setFocusPoints([])
+        setStatus(cameraMode === 'rear' ? '後鏡頭已就緒' : '前鏡頭已就緒')
 
         if (videoRef.current) {
-          videoRef.current.srcObject = nextStream
-        }
-
-        const mediaDevices = await navigator.mediaDevices.enumerateDevices()
-        if (!cancelled) {
-          const videoInputs = mediaDevices.filter((device) => device.kind === 'videoinput')
-          setDevices(videoInputs)
+          videoRef.current.srcObject = result.stream
         }
       } catch (caughtError) {
         if (cancelled) {
@@ -355,8 +595,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const presetSettings = mergeFilterSettings(activePreset.settings)
-    setFilterSettings(presetSettings)
+    setFilterSettings(mergeFilterSettings(activePreset.settings))
   }, [activePreset])
 
   useEffect(() => {
@@ -377,6 +616,37 @@ export default function App() {
     syncVideoSource()
   }, [stream])
 
+  async function refreshTrackSnapshot(track = streamRef.current?.getVideoTracks?.()[0]) {
+    if (!track) {
+      return null
+    }
+
+    const snapshot = getTrackSnapshot(track)
+    setCameraCapabilities(snapshot.capabilities)
+    setCameraSettings(snapshot.settings)
+    setSupportedConstraints(snapshot.supportedConstraints)
+    return snapshot
+  }
+
+  async function applyTrackAdvancedSettings(payload, successMessage) {
+    const track = streamRef.current?.getVideoTracks?.()[0]
+    if (!track) {
+      return false
+    }
+
+    try {
+      await track.applyConstraints({
+        advanced: [payload]
+      })
+      await refreshTrackSnapshot(track)
+      setStatus(successMessage)
+      return true
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : '無法套用相機控制。')
+      return false
+    }
+  }
+
   async function handleToggleTorch() {
     const track = stream?.getVideoTracks()[0]
     if (!track) {
@@ -385,11 +655,12 @@ export default function App() {
 
     try {
       const nextEnabled = !torchEnabled
-      const changed = await setTorch(track, nextEnabled)
-      if (changed) {
-        setTorchEnabled(nextEnabled)
-        setStatus(nextEnabled ? '手電筒已開啟' : '手電筒已關閉')
-      }
+      await track.applyConstraints({
+        advanced: [{ torch: nextEnabled }]
+      })
+      setTorchEnabled(nextEnabled)
+      await refreshTrackSnapshot(track)
+      setStatus(nextEnabled ? '手電筒已開啟' : '手電筒已關閉')
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : '無法切換手電筒。')
     }
@@ -420,6 +691,66 @@ export default function App() {
     setZoomLevel(Number(value))
   }
 
+  async function handleCameraModeControl(key, value) {
+    if (!value) {
+      return
+    }
+
+    await applyTrackAdvancedSettings({ [key]: value }, `${formatCameraModeLabel(value)}模式已套用`)
+  }
+
+  async function handleCameraRangeControl(key, value) {
+    await applyTrackAdvancedSettings({ [key]: Number(value) }, `${CAMERA_CONTROL_LABELS[key]}已更新`)
+  }
+
+  async function applyFocusPoints(points) {
+    setFocusPoints(points)
+
+    if (!supportsPointsOfInterest) {
+      setStatus('已標記多點對焦位置，目前裝置僅提供視覺對焦輔助')
+      return
+    }
+
+    const payload = {
+      pointsOfInterest: points.map((point) => ({ x: point.x, y: point.y }))
+    }
+
+    if (focusModes.includes('continuous')) {
+      payload.focusMode = 'continuous'
+    }
+
+    await applyTrackAdvancedSettings(payload, `已更新 ${points.length} 個對焦點`)
+  }
+
+  async function handlePreviewPointerDown(event) {
+    if (!stream) {
+      return
+    }
+
+    if (event.target.closest('.focus-point, .focus-clear-button, .permission-overlay')) {
+      return
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const nextPoint = {
+      id: `${Date.now()}-${Math.random()}`,
+      x: clamp((event.clientX - bounds.left) / bounds.width, 0.08, 0.92),
+      y: clamp((event.clientY - bounds.top) / bounds.height, 0.08, 0.92)
+    }
+    const nextPoints = [...focusPoints.slice(-4), nextPoint]
+    await applyFocusPoints(nextPoints)
+  }
+
+  async function handleClearFocusPoints() {
+    setFocusPoints([])
+
+    if (supportsPointsOfInterest) {
+      await applyTrackAdvancedSettings({ pointsOfInterest: [] }, '已清除對焦點')
+    } else {
+      setStatus('已清除視覺對焦點')
+    }
+  }
+
   function handleCapture() {
     const video = videoRef.current
     const canvas = canvasRef.current
@@ -439,7 +770,7 @@ export default function App() {
     }
 
     context.filter = filterStyle
-    drawZoomedFrame(context, video, canvas, zoomLevel)
+    drawProcessedFrame(context, video, canvas, zoomLevel, filterSettings.faceSlim)
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
     setLastCapture(dataUrl)
@@ -459,13 +790,16 @@ export default function App() {
           <p className="eyebrow">PWA FILTER CAMERA</p>
           <h1>手機可安裝的 React 濾鏡相機</h1>
           <p className="hero-copy">
-            以 GitHub Pages 為部署目標，提供大量濾鏡、前後鏡頭切換、手電筒控制與即拍即存。
+            以 GitHub Pages 為部署目標，提供大量濾鏡、前後鏡頭切換、手電筒控制、多點對焦與進階相機參數調整。
           </p>
         </div>
         <div className="status-card">
           <span className="status-pill">{status}</span>
           <p>{torchSupported ? '目前裝置支援手電筒切換。' : '目前裝置可能不支援手電筒控制。'}</p>
-          <p>濾鏡數量：{FILTER_PRESETS.length} 組預設 + 8 組手動滑桿</p>
+          <p>濾鏡數量：{FILTER_PRESETS.length} 組預設 + {FILTER_CONTROLS.length} 組手動滑桿</p>
+          <p>
+            進階參數：{proSupportSummary.length > 0 ? proSupportSummary.join('、') : '目前瀏覽器未提供硬體級控制'}
+          </p>
         </div>
       </header>
 
@@ -494,15 +828,28 @@ export default function App() {
             </div>
           </div>
 
-          <div className="preview-shell">
+          <div className="preview-shell" onPointerDown={handlePreviewPointerDown}>
             <video
               ref={videoRef}
               className="camera-feed"
               playsInline
               muted
               autoPlay
-              style={{ filter: filterStyle, transform: `scale(${zoomLevel})` }}
+              style={{ filter: filterStyle, transform: previewTransform }}
             />
+
+            {focusPoints.map((point, index) => (
+              <button
+                key={point.id}
+                type="button"
+                className="focus-point"
+                style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
+                aria-label={`Focus point ${index + 1}`}
+              >
+                <span>{index + 1}</span>
+              </button>
+            ))}
+
             {!stream && !isBooting ? (
               <div className="permission-overlay">
                 <p className="permission-title">
@@ -523,12 +870,20 @@ export default function App() {
                 </button>
               </div>
             ) : null}
+
             <div className="preview-overlay">
               <span>{activePreset.name}</span>
               <span>
-                {activePreset.description} · {zoomLevel.toFixed(1)}x
+                {activePreset.description} · {zoomLevel.toFixed(1)}x · 對焦點 {focusPoints.length}
               </span>
             </div>
+
+            {focusPoints.length > 0 ? (
+              <button type="button" className="focus-clear-button" onClick={handleClearFocusPoints}>
+                清除對焦點
+              </button>
+            ) : null}
+
             {isBooting ? <div className="loading-scrim">啟動鏡頭中…</div> : null}
           </div>
 
@@ -576,7 +931,7 @@ export default function App() {
             </label>
           </div>
 
-          <div className="action-row">
+          <div className="action-row mobile-action-row">
             <button type="button" className="secondary-button" onClick={handleStartCamera}>
               {stream ? '重新連線相機' : '啟動相機'}
             </button>
@@ -591,6 +946,91 @@ export default function App() {
             >
               {torchEnabled ? '關閉手電筒' : '開啟手電筒'}
             </button>
+          </div>
+
+          <div className="pro-panel">
+            <div className="panel-heading compact">
+              <div>
+                <p className="panel-kicker">Camera Controls</p>
+                <h2>對焦與專業參數</h2>
+              </div>
+            </div>
+
+            <div className="pro-grid">
+              <div className="pro-card">
+                <div className="pro-card-header">
+                  <strong>多點對焦</strong>
+                  <span>{supportsPointsOfInterest ? '硬體支援' : '視覺輔助'}</span>
+                </div>
+                <p>點擊預覽畫面最多可放置 5 個對焦點，支援的裝置會同步套用硬體對焦區域。</p>
+              </div>
+
+              {focusModes.length > 0 ? (
+                <label className="field pro-card">
+                  <span>對焦模式</span>
+                  <select
+                    value={cameraSettings.focusMode ?? focusModes[0]}
+                    onChange={(event) => handleCameraModeControl('focusMode', event.target.value)}
+                    disabled={!stream}
+                  >
+                    {focusModes.map((mode) => (
+                      <option key={mode} value={mode}>
+                        {formatCameraModeLabel(mode)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+
+              {whiteBalanceModes.length > 0 ? (
+                <label className="field pro-card">
+                  <span>白平衡模式</span>
+                  <select
+                    value={cameraSettings.whiteBalanceMode ?? whiteBalanceModes[0]}
+                    onChange={(event) => handleCameraModeControl('whiteBalanceMode', event.target.value)}
+                    disabled={!stream}
+                  >
+                    {whiteBalanceModes.map((mode) => (
+                      <option key={mode} value={mode}>
+                        {formatCameraModeLabel(mode)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+
+              {proRangeControls.map((control) => (
+                <label key={control.key} className="slider-field pro-card">
+                  <div>
+                    <span>{CAMERA_CONTROL_LABELS[control.key]}</span>
+                    <strong>
+                      {formatRangeValue(
+                        control.key,
+                        Number.isFinite(cameraSettings[control.key]) ? cameraSettings[control.key] : control.range.min
+                      )}
+                    </strong>
+                  </div>
+                  <input
+                    type="range"
+                    min={control.range.min}
+                    max={control.range.max}
+                    step={getStepForRange(control.key, control.range)}
+                    value={
+                      Number.isFinite(cameraSettings[control.key]) ? cameraSettings[control.key] : control.range.min
+                    }
+                    onChange={(event) => handleCameraRangeControl(control.key, event.target.value)}
+                    disabled={!stream}
+                  />
+                </label>
+              ))}
+
+              {proSupportSummary.length === 0 ? (
+                <div className="pro-card pro-empty">
+                  <strong>目前瀏覽器未提供硬體級專業控制</strong>
+                  <p>這個裝置仍可使用多點對焦標記、濾鏡、美顏與數碼放大。Chrome Android 通常支援最多，iOS Safari 會較保守。</p>
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <canvas ref={canvasRef} className="hidden-canvas" />
@@ -619,7 +1059,7 @@ export default function App() {
           </div>
           <div className="permission-guide-card">
             <span className="permission-guide-pill">
-              {isStandalone ? '目前為已安裝 PWA' : '目前為瀏覽器模式'} · 權限狀態：{permissionHintState}
+              {isStandalone ? '目前為已安裝 PWA' : '目前為瀏覽器模式'} · 權限狀態：{formatPermissionState(permissionHintState)}
             </span>
             {permissionGuide.map((item) => (
               <p key={item} className="permission-guide-item">
@@ -631,7 +1071,7 @@ export default function App() {
           <div className="panel-heading compact">
             <div>
               <p className="panel-kicker">Filter Library</p>
-              <h2>大量濾鏡</h2>
+              <h2>美顏與濾鏡</h2>
             </div>
           </div>
           <div className="preset-grid">
