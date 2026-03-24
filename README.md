@@ -43,21 +43,25 @@ npm run build
 2. 將 `Build and deployment` 設為 `GitHub Actions`
 3. 推送到 `main` 後等待 workflow 完成
 
+此流程使用一般 Git 與 GitHub Actions，不需要 Git LFS，也不需要手動維護 `gh-pages` 分支。
+
+若目前 GitHub Pages 仍設定為讀取 `main` 分支根目錄，請先執行一次 `npm run build`，再把根目錄產生的 `index.html`、`assets/`、`manifest.webmanifest`、`sw.js` 與 `workbox-*.js` 一起提交到 `main`。本專案已針對這種 main-root 部署模式做相容處理。
+
 完成後，專案會部署到：
 
 - `https://<你的帳號>.github.io/<repository-name>/`
 - 若 repository 名稱本身就是 `<你的帳號>.github.io`，系統會自動使用根路徑部署到 `https://<你的帳號>.github.io/`
 
-### 本機手動部署
+### 本機建置驗證
 
 ```bash
-npm run deploy
+npm run build
 ```
 
-若 repository 名稱與目前資料夾不同，請先指定 base path：
+若 repository 名稱與目前資料夾不同，請先指定 base path 後再建置驗證：
 
 ```bash
-VITE_PUBLIC_BASE=/你的-repository-name/ npm run deploy
+VITE_PUBLIC_BASE=/你的-repository-name/ npm run build
 ```
 
 ## 裝置注意事項

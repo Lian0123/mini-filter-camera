@@ -6,11 +6,11 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default [
   {
-    ignores: ['dist']
+    ignores: ['dist', 'assets', 'sw.js', 'workbox-*.js']
   },
   js.configs.recommended,
   {
-    files: ['*.config.js', '.github/**/*.js'],
+    files: ['*.config.js', '.github/**/*.js', 'scripts/**/*.{js,mjs}'],
     languageOptions: {
       globals: {
         ...globals.node

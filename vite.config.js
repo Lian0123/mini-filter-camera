@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+const sourceRoot = 'app'
+
 function normalizeBasePath(value) {
   if (!value || value === '/') {
     return '/'
@@ -39,9 +41,17 @@ function resolveBasePath() {
 }
 
 const basePath = resolveBasePath()
+const isGitHubActionsBuild = process.env.GITHUB_ACTIONS === 'true'
+const buildOutputDirectory = isGitHubActionsBuild ? '../dist' : '../'
 
 export default defineConfig({
+  root: sourceRoot,
+  publicDir: '../public',
   base: basePath,
+  build: {
+    outDir: buildOutputDirectory,
+    emptyOutDir: isGitHubActionsBuild
+  },
   plugins: [
     react(),
     VitePWA({
