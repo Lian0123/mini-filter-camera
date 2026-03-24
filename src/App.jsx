@@ -7,6 +7,20 @@ import {
   mergeFilterSettings
 } from './filters'
 
+const PERMISSION_STATE = {
+  idle: 'idle',
+  requesting: 'requesting',
+  granted: 'granted',
+  denied: 'denied',
+  unsupported: 'unsupported'
+}
+
+const ZOOM_RANGE = {
+  min: 1,
+  max: 4,
+  step: 0.1
+}
+
 const QUALITY_MODES = [
   {
     id: 'balanced',
@@ -79,6 +93,100 @@ async function setTorch(track, enabled) {
   return true
 }
 
+function getCameraErrorMessage(caughtError) {
+  if (!(caughtError instanceof Error)) {
+    return '無法取得相機存取權。請確認瀏覽器已允許相機權限後再試一次。'
+  }
+
+  if (caughtError.name === 'NotAllowedError' || caughtError.name === 'PermissionDeniedError') {
+    return '瀏覽器拒絕了相機權限。請點擊「啟動相機」，並在權限提示中選擇允許；若先前已拒絕，請到瀏覽器網站設定把相機改成允許後再重試。'
+  }
+
+  if (caughtError.name === 'NotFoundError' || caughtError.name === 'DevicesNotFoundError') {
+    return '找不到可用的相機裝置。請確認手機或電腦有可用鏡頭。'
+  }
+
+  if (caughtError.name === 'NotReadableError' || caughtError.name === 'TrackStartError') {
+    return '相機目前被其他 App 或分頁占用。請關閉其他正在使用鏡頭的程式後再試一次。'
+  }
+
+  if (caughtError.name === 'OverconstrainedError') {
+    return '目前裝置不支援這組鏡頭或畫質條件。請改用其他鏡頭或畫質模式後重試。'
+  }
+
+  if (caughtError.name === 'SecurityError') {
+    return '目前環境無法安全存取相機。請確認你是從 https 的 GitHub Pages 網址開啟，而不是本機檔案。'
+  }
+
+  return caughtError.message || '無法取得相機存取權。請稍後重試。'
+}
+
+function detectPlatform() {
+  const userAgent = navigator.userAgent.toLowerCase()
+
+  if (/iphone|ipad|ipod/.test(userAgent)) {
+    return 'ios'
+  }
+
+  if (userAgent.includes('android')) {
+    return 'android'
+  }
+
+  return 'desktop'
+}
+
+function detectStandaloneMode() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true
+}
+
+function getPermissionGuide({ platform, isStandalone, permissionState }) {
+  if (permissionState === PERMISSION_STATE.granted) {
+    return ['相機權限已允許，之後可直接重新開啟此 PWA 使用鏡頭。']
+  }
+
+  if (platform === 'ios') {
+    return isStandalone
+      ? [
+          'iPhone 主畫面啟動的 PWA 第一次仍會跳出相機權限提示，請選擇允許。',
+          '若先前拒絕，請到 iPhone 的「設定 -> Safari -> 相機」或網站權限中改成允許。',
+          '若仍無法使用，請刪除主畫面捷徑後重新加入，或回到 Safari 先授權一次。'
+        ]
+      : [
+          '請先在 Safari 中點擊啟動相機並允許權限。',
+          '確認可用後，再使用「加入主畫面」安裝成 PWA，之後會沿用已授權狀態。',
+          '若曾拒絕，請到 iPhone 設定中的 Safari 相機權限改成允許。'
+        ]
+  }
+
+  if (platform === 'android') {
+    return isStandalone
+      ? [
+          'Android 安裝後的 PWA 會以獨立 App 形式要求相機權限，請選擇允許。',
+          '若先前拒絕，請到「App 資訊 -> 權限 -> 相機」重新開啟。',
+          '部分瀏覽器會把權限綁在 Chrome 或 Edge，本頁重新啟動相機即可再次請求。'
+        ]
+      : [
+          '請在 Chrome 或 Edge 中點擊啟動相機並允許權限。',
+          '安裝成 PWA 後，若看不到權限提示，請到系統的 App 權限頁重新開啟相機。',
+          '如果鏡頭被別的 App 占用，先關掉其他相機 App 再重試。'
+        ]
+  }
+
+  return [
+    '請點擊啟動相機並允許瀏覽器的相機提示。',
+    '若先前拒絕，請到目前網站的權限設定把相機改成允許。'
+  ]
+}
+
+function drawZoomedFrame(context, video, canvas, zoomLevel) {
+  const sourceWidth = video.videoWidth / zoomLevel
+  const sourceHeight = video.videoHeight / zoomLevel
+  const sourceX = (video.videoWidth - sourceWidth) / 2
+  const sourceY = (video.videoHeight - sourceHeight) / 2
+
+  context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+}
+
 export default function App() {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
@@ -90,21 +198,72 @@ export default function App() {
   const [qualityId, setQualityId] = useState('balanced')
   const [activePresetId, setActivePresetId] = useState('clean')
   const [filterSettings, setFilterSettings] = useState(DEFAULT_FILTER_SETTINGS)
-  const [status, setStatus] = useState('準備請求相機權限…')
+  const [status, setStatus] = useState('點擊下方按鈕以啟動相機')
   const [error, setError] = useState('')
   const [torchSupported, setTorchSupported] = useState(false)
   const [torchEnabled, setTorchEnabled] = useState(false)
-  const [isBooting, setIsBooting] = useState(true)
+  const [isBooting, setIsBooting] = useState(false)
   const [lastCapture, setLastCapture] = useState('')
+  const [permissionState, setPermissionState] = useState(PERMISSION_STATE.idle)
+  const [cameraRequestVersion, setCameraRequestVersion] = useState(0)
+  const [permissionHintState, setPermissionHintState] = useState('unknown')
+  const [platform, setPlatform] = useState('desktop')
+  const [isStandalone, setIsStandalone] = useState(false)
+  const [zoomLevel, setZoomLevel] = useState(1)
 
   const activePreset = FILTER_PRESETS.find((preset) => preset.id === activePresetId) ?? FILTER_PRESETS[0]
   const filterStyle = buildFilterString(filterSettings)
+  const permissionGuide = getPermissionGuide({
+    platform,
+    isStandalone,
+    permissionState: permissionHintState === 'denied' ? PERMISSION_STATE.denied : permissionState
+  })
+
+  useEffect(() => {
+    setPlatform(detectPlatform())
+    setIsStandalone(detectStandaloneMode())
+  }, [])
+
+  useEffect(() => {
+    if (!navigator.permissions?.query) {
+      return undefined
+    }
+
+    let mounted = true
+    let permissionStatus
+
+    async function monitorPermission() {
+      try {
+        permissionStatus = await navigator.permissions.query({ name: 'camera' })
+        if (!mounted) {
+          return
+        }
+
+        setPermissionHintState(permissionStatus.state)
+        permissionStatus.onchange = () => {
+          setPermissionHintState(permissionStatus.state)
+        }
+      } catch {
+        setPermissionHintState('unknown')
+      }
+    }
+
+    monitorPermission()
+
+    return () => {
+      mounted = false
+      if (permissionStatus) {
+        permissionStatus.onchange = null
+      }
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
 
     async function bootCamera() {
       setIsBooting(true)
+      setPermissionState(PERMISSION_STATE.requesting)
       setError('')
       setStatus('正在啟動相機…')
 
@@ -130,6 +289,8 @@ export default function App() {
         setStream(nextStream)
         setTorchSupported(nextTorchSupported)
         setTorchEnabled(false)
+        setPermissionState(PERMISSION_STATE.granted)
+        setPermissionHintState('granted')
         setStatus('相機已就緒')
 
         if (videoRef.current) {
@@ -146,8 +307,21 @@ export default function App() {
           return
         }
 
-        setError(caughtError instanceof Error ? caughtError.message : '無法取得相機權限。')
-        setStatus('相機啟動失敗')
+        if (caughtError instanceof Error) {
+          if (caughtError.name === 'NotAllowedError' || caughtError.name === 'PermissionDeniedError') {
+            setPermissionState(PERMISSION_STATE.denied)
+            setPermissionHintState('denied')
+            setStatus('相機權限遭拒')
+          } else {
+            setPermissionState(PERMISSION_STATE.idle)
+            setStatus('相機啟動失敗')
+          }
+        } else {
+          setPermissionState(PERMISSION_STATE.idle)
+          setStatus('相機啟動失敗')
+        }
+
+        setError(getCameraErrorMessage(caughtError))
       } finally {
         if (!cancelled) {
           setIsBooting(false)
@@ -158,7 +332,12 @@ export default function App() {
     if (!navigator.mediaDevices?.getUserMedia) {
       setError('此瀏覽器不支援相機 API。請使用最新版 Chrome 或 Safari。')
       setStatus('裝置不支援')
+      setPermissionState(PERMISSION_STATE.unsupported)
       setIsBooting(false)
+      return undefined
+    }
+
+    if (cameraRequestVersion === 0) {
       return undefined
     }
 
@@ -167,7 +346,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [cameraMode, qualityId, selectedDeviceId])
+  }, [cameraMode, qualityId, selectedDeviceId, cameraRequestVersion])
 
   useEffect(() => {
     return () => {
@@ -233,6 +412,14 @@ export default function App() {
     setCameraMode(mode)
   }
 
+  function handleStartCamera() {
+    setCameraRequestVersion((current) => current + 1)
+  }
+
+  function handleZoomChange(value) {
+    setZoomLevel(Number(value))
+  }
+
   function handleCapture() {
     const video = videoRef.current
     const canvas = canvasRef.current
@@ -252,7 +439,7 @@ export default function App() {
     }
 
     context.filter = filterStyle
-    context.drawImage(video, 0, 0, canvas.width, canvas.height)
+    drawZoomedFrame(context, video, canvas, zoomLevel)
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
     setLastCapture(dataUrl)
@@ -314,11 +501,33 @@ export default function App() {
               playsInline
               muted
               autoPlay
-              style={{ filter: filterStyle }}
+              style={{ filter: filterStyle, transform: `scale(${zoomLevel})` }}
             />
+            {!stream && !isBooting ? (
+              <div className="permission-overlay">
+                <p className="permission-title">
+                  {permissionState === PERMISSION_STATE.denied ? '需要重新授權相機' : '尚未啟動相機'}
+                </p>
+                <p className="permission-copy">
+                  {permissionState === PERMISSION_STATE.denied
+                    ? '請重新點擊啟動，並在瀏覽器權限提示中允許相機；若之前已拒絕，請到網站設定開啟相機權限。'
+                    : 'GitHub Pages 已提供安全的 https 環境，但仍需要你手動允許相機權限。'}
+                </p>
+                <button
+                  type="button"
+                  className="permission-button"
+                  onClick={handleStartCamera}
+                  disabled={permissionState === PERMISSION_STATE.unsupported}
+                >
+                  {permissionState === PERMISSION_STATE.denied ? '重新請求相機權限' : '啟動相機'}
+                </button>
+              </div>
+            ) : null}
             <div className="preview-overlay">
               <span>{activePreset.name}</span>
-              <span>{activePreset.description}</span>
+              <span>
+                {activePreset.description} · {zoomLevel.toFixed(1)}x
+              </span>
             </div>
             {isBooting ? <div className="loading-scrim">啟動鏡頭中…</div> : null}
           </div>
@@ -326,7 +535,11 @@ export default function App() {
           <div className="control-grid">
             <label className="field">
               <span>鏡頭裝置</span>
-              <select value={selectedDeviceId} onChange={(event) => setSelectedDeviceId(event.target.value)}>
+              <select
+                value={selectedDeviceId}
+                onChange={(event) => setSelectedDeviceId(event.target.value)}
+                disabled={!stream}
+              >
                 <option value="">依前後鏡頭自動選擇</option>
                 {devices.map((device, index) => (
                   <option key={device.deviceId} value={device.deviceId}>
@@ -338,7 +551,7 @@ export default function App() {
 
             <label className="field">
               <span>畫質模式</span>
-              <select value={qualityId} onChange={(event) => setQualityId(event.target.value)}>
+              <select value={qualityId} onChange={(event) => setQualityId(event.target.value)} disabled={!stream}>
                 {QUALITY_MODES.map((quality) => (
                   <option key={quality.id} value={quality.id}>
                     {quality.label}
@@ -346,17 +559,35 @@ export default function App() {
                 ))}
               </select>
             </label>
+
+            <label className="field field-wide">
+              <span>數碼放大</span>
+              <div className="zoom-control">
+                <input
+                  type="range"
+                  min={ZOOM_RANGE.min}
+                  max={ZOOM_RANGE.max}
+                  step={ZOOM_RANGE.step}
+                  value={zoomLevel}
+                  onChange={(event) => handleZoomChange(event.target.value)}
+                />
+                <strong>{zoomLevel.toFixed(1)}x</strong>
+              </div>
+            </label>
           </div>
 
           <div className="action-row">
-            <button type="button" className="capture-button" onClick={handleCapture}>
+            <button type="button" className="secondary-button" onClick={handleStartCamera}>
+              {stream ? '重新連線相機' : '啟動相機'}
+            </button>
+            <button type="button" className="capture-button" onClick={handleCapture} disabled={!stream}>
               拍照並下載
             </button>
             <button
               type="button"
               className={torchEnabled ? 'secondary-button enabled' : 'secondary-button'}
               onClick={handleToggleTorch}
-              disabled={!torchSupported}
+              disabled={!stream || !torchSupported}
             >
               {torchEnabled ? '關閉手電筒' : '開啟手電筒'}
             </button>
@@ -380,6 +611,23 @@ export default function App() {
         </section>
 
         <section className="sidebar-panel">
+          <div className="panel-heading compact">
+            <div>
+              <p className="panel-kicker">PWA Permission</p>
+              <h2>手機權限指引</h2>
+            </div>
+          </div>
+          <div className="permission-guide-card">
+            <span className="permission-guide-pill">
+              {isStandalone ? '目前為已安裝 PWA' : '目前為瀏覽器模式'} · 權限狀態：{permissionHintState}
+            </span>
+            {permissionGuide.map((item) => (
+              <p key={item} className="permission-guide-item">
+                {item}
+              </p>
+            ))}
+          </div>
+
           <div className="panel-heading compact">
             <div>
               <p className="panel-kicker">Filter Library</p>

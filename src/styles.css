@@ -192,6 +192,10 @@ h2 {
   object-fit: cover;
 }
 
+.camera-feed {
+  transform-origin: center center;
+}
+
 .preview-overlay {
   position: absolute;
   left: 16px;
@@ -217,6 +221,45 @@ h2 {
   letter-spacing: 0.08em;
 }
 
+.permission-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 14px;
+  padding: 24px;
+  background: linear-gradient(180deg, rgba(5, 10, 18, 0.56), rgba(5, 10, 18, 0.88));
+}
+
+.permission-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.permission-copy {
+  max-width: 34ch;
+  color: rgba(242, 247, 255, 0.82);
+  line-height: 1.6;
+}
+
+.permission-button {
+  border: 0;
+  border-radius: 18px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #1f6feb, #14b8a6);
+  color: #f8fbff;
+  font-weight: 700;
+}
+
+.permission-button:disabled,
+select:disabled,
+input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .control-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -228,6 +271,10 @@ h2 {
 .slider-field {
   display: grid;
   gap: 10px;
+}
+
+.field-wide {
+  grid-column: 1 / -1;
 }
 
 .field span,
@@ -247,6 +294,23 @@ select {
   color: #f2f7ff;
   padding: 12px 14px;
   border-radius: 16px;
+}
+
+.zoom-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(195, 216, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.zoom-control strong {
+  min-width: 3.2rem;
+  text-align: right;
+  color: #a5ddff;
 }
 
 .action-row {
@@ -286,6 +350,11 @@ select {
   cursor: not-allowed;
 }
 
+.capture-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .error-banner {
   margin-top: 16px;
   border-radius: 18px;
@@ -297,6 +366,33 @@ select {
 
 .capture-card {
   margin-top: 20px;
+}
+
+.permission-guide-card {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 22px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(193, 214, 255, 0.14);
+  background:
+    linear-gradient(155deg, rgba(16, 30, 52, 0.72), rgba(8, 16, 28, 0.8)),
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.2), transparent 45%);
+}
+
+.permission-guide-pill {
+  display: inline-flex;
+  width: fit-content;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(126, 192, 255, 0.22);
+  background: rgba(31, 111, 235, 0.16);
+  color: #a5ddff;
+}
+
+.permission-guide-item {
+  color: rgba(242, 247, 255, 0.78);
+  line-height: 1.65;
 }
 
 .capture-preview {

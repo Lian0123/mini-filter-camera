@@ -10,6 +10,14 @@ export default [
   },
   js.configs.recommended,
   {
+    files: ['*.config.js', '.github/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node
+      }
+    }
+  },
+  {
     files: ['**/*.{js,jsx}'],
     languageOptions: {
       ecmaVersion: 'latest',
